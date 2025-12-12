@@ -1,7 +1,9 @@
 /* Мини-игра: “Дима переживает рабочий день”
    Управление:
-   - ПРОБЕЛ / КЛИК по канвасу = прыжок (там где нужно)
+   - ПРОБЕЛ / ТАП по экрану = прыжок (там где нужно)
    - Кнопки в панели = действия по сценарию
+
+   ВАЖНО: теперь адаптивно под мобильные экраны (масштабируется без переписывания координат).
 */
 
 const canvas = document.getElementById("game");
@@ -10,11 +12,47 @@ const ctx = canvas.getContext("2d");
 const ui = {
   hint: document.getElementById("hint"),
   counter: document.getElementById("counter"),
-  panel: document.getElementById("panel"),
   title: document.getElementById("title"),
   text: document.getElementById("text"),
   buttons: document.getElementById("buttons"),
 };
+
+// Базовый “дизайн-экран” (в этих координатах рисуем всегда)
+const BASE_W = 960;
+const BASE_H = 540;
+
+let DPR = 1;
+let scale = 1;
+let offX = 0;
+let offY = 0;
+
+function resize() {
+  DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  canvas.width = Math.floor(w * DPR);
+  canvas.height = Math.floor(h * DPR);
+
+  // масштабируем базовую сцену так, чтобы влезла целиком
+  scale = Math.min(w / BASE_W, h / BASE_H);
+  offX = (w - BASE_W * scale) / 2;
+  offY = (h - BASE_H * scale) / 2;
+}
+window.addEventListener("resize", resize);
+resize();
+
+function beginDraw() {
+  // чистим весь экран в пикселях устройства
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // ставим трансформ под “базовые координаты”
+  ctx.setTransform(DPR * scale, 0, 0, DPR * scale, DPR * offX, DPR * offY);
+}
 
 const S = {
   INTRO: "INTRO",
@@ -28,7 +66,7 @@ const S = {
 
 let state = S.INTRO;
 
-// “Герой”
+// Герой
 const dima = {
   x: 160,
   y: 0,
@@ -40,23 +78,21 @@ const dima = {
   face: "🙂",
 };
 
-// Мир/физика
+// Мир
 const world = {
   groundY: 420,
   gravity: 0.9,
   jumpV: -16,
-  scrollX: 0,
 };
 
 // Прогресс сцен
 const prog = {
   s1_jumps: 0,
-  s1_need: 10,
+  s1_need: 5, // ✅ было 10, стало 5
   s2_done: 0,
   s2_need: 3,
   confetti: [],
   flash: 0,
-  black: 0,
 };
 
 function resetHero() {
@@ -95,26 +131,24 @@ function tryJump() {
   dima.vy = world.jumpV;
   dima.onGround = false;
 
-  // Сцена 1: 10 прыжков = 10 глотков
+  // Сцена 1: 5 прыжков = 5 глотков
   if (state === S.BUS_STOP) {
     prog.s1_jumps++;
     if (prog.s1_jumps >= prog.s1_need) {
-      // маленькая пауза + переход
       prog.flash = 18;
-      setTimeout(() => goConstruction(), 450);
+      setTimeout(() => goConstruction(), 350);
     } else {
       refreshUI();
     }
   }
 
-  // Сцена 2: перепрыгнуть 3 толпы
+  // Сцена 2: 3 прыжка = 3 толпы
   if (state === S.CONSTRUCTION) {
-    // “успех” засчитываем в момент прыжка, но ограничим “по толпам”
     if (prog.s2_done < prog.s2_need) {
       prog.s2_done++;
       if (prog.s2_done >= prog.s2_need) {
         prog.flash = 18;
-        setTimeout(() => goCoffee(), 450);
+        setTimeout(() => goCoffee(), 350);
       } else {
         refreshUI();
       }
@@ -122,7 +156,13 @@ function tryJump() {
   }
 }
 
-canvas.addEventListener("mousedown", () => tryJump());
+// Тап по экрану = прыжок (чтобы мобилка работала сразу)
+canvas.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  tryJump();
+});
+
+// Клавиатура (для ПК)
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
@@ -136,15 +176,12 @@ function goIntro() {
   prog.s1_jumps = 0;
   prog.s2_done = 0;
   prog.confetti = [];
-  prog.black = 0;
 
   setPanel({
     title: "Это Дима. И сегодня ему нужен герой.",
     text: "Помоги Диме пережить рабочий день.",
     hint: "Нажми «Начать»",
-    buttons: [
-      { label: "▶️ Начать", className: "primary", onClick: () => goBusStop() },
-    ],
+    buttons: [{ label: "▶️ Начать", className: "primary", onClick: () => goBusStop() }],
   });
 }
 
@@ -174,8 +211,7 @@ function goCrowd() {
 
 function goBlack() {
   state = S.BLACK;
-  prog.black = 255;
-  refreshUI();
+  setPanel({ title: "", text: "", hint: "", counter: "", buttons: [] });
 }
 
 function goWin() {
@@ -188,9 +224,10 @@ function refreshUI() {
     setPanel({
       title: "Остановка у моря",
       text:
-        "Автобус опаздывает. Помоги водителю быстрее допить чай.\n" +
-        "1 прыжок = 1 глоток.",
-      hint: "Пробел / клик = прыжок",
+        "Автобус опаздывает.\n" +
+        "Помоги водителю быстрее допить чай.\n" +
+        "1 прыжок = 1 глоток ☕",
+      hint: "Тап по экрану / пробел = прыжок",
       counter: `Глотков: ${prog.s1_jumps} / ${prog.s1_need}`,
       buttons: [{ label: "⏭️ Пропустить (для теста)", className: "ghost", onClick: () => goConstruction() }],
     });
@@ -200,7 +237,7 @@ function refreshUI() {
     setPanel({
       title: "Стройплощадка",
       text: "Перепрыгни работяг, чтобы попасть на АККУЮ.",
-      hint: "Пробел / клик = прыжок",
+      hint: "Тап / пробел = прыжок",
       counter: `Перепрыгнуто: ${prog.s2_done} / ${prog.s2_need}`,
       buttons: [{ label: "⏭️ Пропустить (для теста)", className: "ghost", onClick: () => goCoffee() }],
     });
@@ -211,13 +248,11 @@ function refreshUI() {
       title: "Кофемашина",
       text: "Чтобы выпить кофе — пни Андропова в жопу.",
       hint: "Нужно одно точное действие",
-      buttons: [
-        {
-          label: "🦵 Пнуть Андропова в жопу",
-          className: "danger",
-          onClick: () => goCrowd(),
-        },
-      ],
+      buttons: [{
+        label: "🦵 Пнуть Андропова в жопу",
+        className: "danger",
+        onClick: () => goCrowd(),
+      }],
     });
   }
 
@@ -225,43 +260,29 @@ function refreshUI() {
     setPanel({
       title: "Рабочий ад приближается",
       text: "Чтобы пережить этот день — заряжай писькомёт.",
-      hint: "Дима надеется на тебя",
-      buttons: [
-        {
-          label: "⚡ Зарядить писькомёт",
-          className: "primary",
-          onClick: () => {
-            goBlack();
-            // появляется кнопка “ПЛИ!”
-            setTimeout(() => {
-              setPanel({
-                title: "",
-                text: "",
-                hint: "",
-                buttons: [
-                  {
-                    label: "💥 ПЛИ!",
-                    className: "danger",
-                    onClick: () => {
-                      shootConfetti();
-                      setTimeout(() => goWin(), 900);
-                    },
-                  },
-                ],
-              });
-            }, 300);
-          },
+      hint: "Соберись, Дима верит",
+      buttons: [{
+        label: "⚡ Зарядить писькомёт",
+        className: "primary",
+        onClick: () => {
+          goBlack();
+          setTimeout(() => {
+            setPanel({
+              title: "",
+              text: "",
+              hint: "",
+              buttons: [{
+                label: "💥 ПЛИ!",
+                className: "danger",
+                onClick: () => {
+                  shootConfetti();
+                  setTimeout(() => goWin(), 700);
+                },
+              }],
+            });
+          }, 250);
         },
-      ],
-    });
-  }
-
-  if (state === S.BLACK) {
-    setPanel({
-      title: "",
-      text: "",
-      hint: "",
-      buttons: [],
+      }],
     });
   }
 
@@ -270,33 +291,29 @@ function refreshUI() {
       title: "Финал",
       text: "Поздравляю! Ты победил этот рабочий день!",
       hint: "Можно пройти ещё раз",
-      buttons: [
-        { label: "🔁 Пройти ещё раз", className: "primary", onClick: () => goIntro() },
-      ],
+      buttons: [{ label: "🔁 Пройти ещё раз", className: "primary", onClick: () => goIntro() }],
     });
   }
 }
 
 function shootConfetti() {
-  // набросаем конфетти
   prog.confetti = [];
   for (let i = 0; i < 260; i++) {
     prog.confetti.push({
-      x: Math.random() * canvas.width,
+      x: Math.random() * BASE_W,
       y: -20 - Math.random() * 300,
-      vx: (-2 + Math.random() * 4),
+      vx: -2 + Math.random() * 4,
       vy: 3 + Math.random() * 6,
       r: 2 + Math.random() * 4,
       a: Math.random() * Math.PI * 2,
-      va: (-0.2 + Math.random() * 0.4),
+      va: -0.2 + Math.random() * 0.4,
     });
   }
 }
 
-// РЕНДЕР
-
+// --- РЕНДЕР ---
 function drawScene() {
-  // фон по сценам
+  // фон
   if (state === S.BUS_STOP) drawSeaBackground();
   else if (state === S.CONSTRUCTION) drawConstructionBackground();
   else if (state === S.COFFEE || state === S.CROWD) drawOfficeBackground();
@@ -304,9 +321,9 @@ function drawScene() {
 
   // земля
   ctx.fillStyle = "rgba(10, 15, 25, 0.55)";
-  ctx.fillRect(0, world.groundY, canvas.width, canvas.height - world.groundY);
+  ctx.fillRect(0, world.groundY, BASE_W, BASE_H - world.groundY);
 
-  // декорации/объекты
+  // объекты
   if (state === S.BUS_STOP) drawBusStopProps();
   if (state === S.CONSTRUCTION) drawWorkersProps();
   if (state === S.COFFEE) drawCoffeeProps();
@@ -318,33 +335,30 @@ function drawScene() {
   // вспышка
   if (prog.flash > 0) {
     ctx.fillStyle = `rgba(255,255,255,${prog.flash / 30})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, BASE_W, BASE_H);
   }
 
-  // черный экран (после “зарядить”)
+  // “черный экран”
   if (state === S.BLACK) {
     ctx.fillStyle = "rgba(0,0,0,0.88)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, BASE_W, BASE_H);
   }
 
   // конфетти
   if (prog.confetti.length) drawConfetti();
 }
 
-function drawNeutralBackground() {
-  // ничего — канвас уже с градиентом через CSS, тут оставим воздух
-}
+function drawNeutralBackground() {}
 
 function drawSeaBackground() {
-  // море полосами
   ctx.save();
   ctx.globalAlpha = 0.9;
   ctx.fillStyle = "rgba(0, 120, 200, 0.55)";
-  ctx.fillRect(0, 290, canvas.width, 120);
+  ctx.fillRect(0, 290, BASE_W, 120);
   ctx.fillStyle = "rgba(0, 90, 170, 0.55)";
-  ctx.fillRect(0, 330, canvas.width, 90);
+  ctx.fillRect(0, 330, BASE_W, 90);
   ctx.fillStyle = "rgba(240, 220, 160, 0.9)";
-  ctx.fillRect(0, world.groundY - 40, canvas.width, 40);
+  ctx.fillRect(0, world.groundY - 40, BASE_W, 40);
   ctx.restore();
 }
 
@@ -352,8 +366,8 @@ function drawConstructionBackground() {
   ctx.save();
   ctx.globalAlpha = 0.9;
   ctx.fillStyle = "rgba(255, 210, 120, 0.55)";
-  ctx.fillRect(0, 260, canvas.width, 140);
-  // башенные “краны”
+  ctx.fillRect(0, 260, BASE_W, 140);
+
   ctx.strokeStyle = "rgba(20,20,20,0.45)";
   ctx.lineWidth = 6;
   for (let i = 0; i < 3; i++) {
@@ -374,36 +388,36 @@ function drawOfficeBackground() {
   ctx.save();
   ctx.globalAlpha = 0.9;
   ctx.fillStyle = "rgba(230, 240, 255, 0.55)";
-  ctx.fillRect(0, 80, canvas.width, 280);
-  // “окна”
+  ctx.fillRect(0, 80, BASE_W, 280);
+
   ctx.fillStyle = "rgba(120, 180, 255, 0.35)";
   for (let i = 0; i < 5; i++) ctx.fillRect(90 + i * 170, 120, 120, 90);
   ctx.restore();
 }
 
 function drawBusStopProps() {
-  // остановка
   ctx.save();
+  // остановка
   ctx.fillStyle = "rgba(20,20,20,0.45)";
   ctx.fillRect(640, 250, 220, 16);
   ctx.fillRect(650, 250, 10, 160);
   ctx.fillRect(840, 250, 10, 160);
+
   ctx.fillStyle = "rgba(255,255,255,0.75)";
   ctx.fillRect(660, 270, 180, 110);
   ctx.fillStyle = "rgba(20,20,20,0.75)";
   ctx.font = "700 16px system-ui";
   ctx.fillText("ОСТАНОВКА", 690, 295);
 
-  // “водитель пьёт чай” (иконка)
+  // чай
   ctx.font = "700 32px system-ui";
   ctx.fillText("🫖", 780, 360);
 
-  // автобус (появляется когда 10/10)
+  // автобус
   if (prog.s1_jumps >= prog.s1_need) {
     drawBus(120 + (Math.sin(Date.now() / 120) * 2), world.groundY - 70);
   } else {
-    // автобус далеко
-    drawBus(980 - (prog.s1_jumps * 20), world.groundY - 70);
+    drawBus(980 - (prog.s1_jumps * 36), world.groundY - 70);
   }
   ctx.restore();
 }
@@ -422,13 +436,12 @@ function drawBus(x, y) {
 }
 
 function drawWorkersProps() {
-  // три “толпы” как препятствия
   const baseX = 460;
   for (let i = 0; i < 3; i++) {
     const x = baseX + i * 170;
     drawCrowdBlob(x, world.groundY - 50, i < prog.s2_done ? 0.25 : 0.85);
   }
-  // вывеска “АККУЮ”
+
   ctx.save();
   ctx.fillStyle = "rgba(20,20,20,0.75)";
   ctx.fillRect(740, 80, 180, 46);
@@ -452,7 +465,6 @@ function drawCrowdBlob(x, y, alpha=0.85) {
 }
 
 function drawCoffeeProps() {
-  // кофемашина + “Андропов”
   ctx.save();
   ctx.fillStyle = "rgba(20,20,20,0.75)";
   ctx.fillRect(650, world.groundY - 140, 170, 140);
@@ -471,7 +483,6 @@ function drawCoffeeProps() {
 }
 
 function drawCrowdProps() {
-  // “злая толпа”
   ctx.save();
   ctx.font = "900 38px system-ui";
   ctx.fillText("😡😡😡📧📧😡😡", 360, world.groundY - 120);
@@ -480,13 +491,10 @@ function drawCrowdProps() {
 
 function drawDima() {
   ctx.save();
-  // тело
   ctx.fillStyle = "rgba(25,25,25,0.8)";
   ctx.fillRect(dima.x, dima.y, dima.w, dima.h);
-  // голова
   ctx.font = "900 34px system-ui";
-  ctx.fillText("🧔", dima.x - 2, dima.y - 6); // пока “условная голова”, потом заменим на спрайт
-  // эмоция
+  ctx.fillText("🧔", dima.x - 2, dima.y - 6);
   ctx.font = "700 16px system-ui";
   ctx.fillStyle = "rgba(255,255,255,0.95)";
   ctx.fillText(dima.face, dima.x + 6, dima.y + dima.h + 18);
@@ -506,10 +514,9 @@ function drawConfetti() {
   ctx.restore();
 }
 
-// ОБНОВЛЕНИЕ
-
+// --- UPDATE LOOP ---
 function step() {
-  // физика героя
+  // физика
   dima.vy += world.gravity;
   dima.y += dima.vy;
 
@@ -529,18 +536,14 @@ function step() {
       p.y += p.vy;
       p.a += p.va;
       p.vy += 0.08;
-      if (p.y > canvas.height + 40) p.y = -40;
-      if (p.x < -20) p.x = canvas.width + 20;
-      if (p.x > canvas.width + 20) p.x = -20;
+      if (p.y > BASE_H + 40) p.y = -40;
+      if (p.x < -20) p.x = BASE_W + 20;
+      if (p.x > BASE_W + 20) p.x = -20;
     }
   }
 
-  // авто-улыбка на победе
-  if (state === S.WIN) dima.face = "😁";
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  beginDraw();
   drawScene();
-
   requestAnimationFrame(step);
 }
 
